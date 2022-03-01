@@ -90,4 +90,18 @@ int main() {
     where();
     return 0;
 }
+// 1
+// 3
+// 2
+// running code in a coroutine
+// bye
+// running code in a thread
 ```
+
+## 闲聊
+
+关于这个协程库，它的实现方式和微信libco是一致的，感兴趣的话可以看下我写的libco关键源码剖析（[Caturra/RTFSC/libco](https://github.com/Caturra000/RTFSC/tree/master/libco)）
+
+另外我对云风大佬的coroutine也挺感兴趣，他的做法恰好是和这个库相反的对称式协程加上共享栈模式，有时间也可以试着实现一下
+
+不过在这之前，我还是想想，该如何把我之前写的网络库进行协程化改造（第三版coming soon！）
