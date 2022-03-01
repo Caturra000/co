@@ -14,4 +14,8 @@ inline bool test() {
     return Coroutine::test();
 }
 
+inline Environment& open() {
+    return Environment::instance();
+}
+
 } // co
