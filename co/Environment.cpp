@@ -11,10 +11,6 @@ Coroutine* Environment::current() {
     return _cStack[_cStackTop - 1].get();
 }
 
-Coroutine* Environment::previous() {
-    return _cStack[_cStackTop - 2].get();
-}
-
 void Environment::push(std::shared_ptr<Coroutine> coroutine) {
     _cStack[_cStackTop++] = std::move(coroutine);
 }
@@ -24,7 +20,7 @@ void Environment::pop() {
 }
 
 Environment::Environment(): _cStackTop(0) {
-    _main = std::make_shared<Coroutine>(this, []{});
+    _main = std::make_shared<Coroutine>(this, [](){});
     // TODO set State
     push(_main);
 }

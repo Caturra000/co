@@ -15,6 +15,12 @@ void Context::prepare(Context::Callback ret, Context::Word rdi) {
     fillRegisters(sp, ret, rdi);
 }
 
+bool Context::test() {
+    char jojo;
+    ptrdiff_t diff = std::distance(std::begin(_stack), &jojo);
+    return diff >= 0 && diff < STACK_SIZE;
+}
+
 Context::Word Context::getSp() {
     auto sp = std::end(_stack) - sizeof(Word);
     sp = decltype(sp)(reinterpret_cast<size_t>(sp) & (~0xF));

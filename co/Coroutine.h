@@ -15,12 +15,20 @@ class Coroutine: public std::enable_shared_from_this<Coroutine> {
 public:
     static Coroutine& current();
 
+    // 测试当前控制流是否位于协程上下文
+    static bool test();
+
     static void yield();
 
     void resume();
 
     // usage: Coroutine::current().yield()
     // void yield();
+
+    Coroutine(const Coroutine&) = delete;
+    Coroutine(Coroutine&&) = delete;
+    Coroutine& operator=(const Coroutine&) = delete;
+    Coroutine& operator=(Coroutine&&) = delete;
 
 // 由于用到std::make_shared，必须公开这个构造函数
 // TODO 设为private

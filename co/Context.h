@@ -39,6 +39,8 @@ public:
 
     void switchFrom(Context *previous);
 
+    bool test();
+
 private:
     Word getSp();
 

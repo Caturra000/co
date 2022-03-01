@@ -7,13 +7,18 @@ Coroutine& Coroutine::current() {
     return *Environment::instance().current();
 }
 
+bool Coroutine::test() {
+    return current()._context.test();
+}
+
 void Coroutine::resume() {
-    if(!_runtime.running) {
+    if(!(_runtime & State::RUNNING)) {
         _context.prepare(Coroutine::callWhenFinish, this);
-        _runtime.running = true;
+        _runtime |= State::RUNNING;
     }
+    auto previous = _master->current();
     _master->push(shared_from_this());
-    _context.switchFrom(&_master->previous()->_context);
+    _context.switchFrom(&previous->_context);
 }
 
 // usage: Coroutine::current().yield()
@@ -39,8 +44,7 @@ void Coroutine::callWhenFinish(Coroutine *coroutine) {
     auto &routine = coroutine->_entry;
     auto &runtime = coroutine->_runtime;
     if(routine) routine();
-    runtime.running = false;
-    runtime.exit = true;
+    runtime ^= (State::EXIT | State::RUNNING);
     // coroutine->yield();
     yield();
 }

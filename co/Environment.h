@@ -17,7 +17,8 @@ public:
 
     Coroutine* current();
 
-    Coroutine* previous();
+    Environment(const Environment&) = delete;
+    Environment& operator=(const Environment&) = delete;
 
 private:
     void push(std::shared_ptr<Coroutine> coroutine);
