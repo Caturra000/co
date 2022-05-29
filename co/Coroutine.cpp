@@ -11,14 +11,28 @@ bool Coroutine::test() {
     return current()._context.test();
 }
 
-void Coroutine::resume() {
+const State Coroutine::runtime() const {
+    return _runtime;
+}
+
+bool Coroutine::exit() const {
+    return _runtime & State::EXIT;
+}
+
+bool Coroutine::running() const {
+    return _runtime & State::RUNNING;
+}
+
+const State Coroutine::resume() {
     if(!(_runtime & State::RUNNING)) {
         _context.prepare(Coroutine::callWhenFinish, this);
         _runtime |= State::RUNNING;
+        _runtime &= ~State::EXIT;
     }
     auto previous = _master->current();
     _master->push(shared_from_this());
     _context.switchFrom(&previous->_context);
+    return _runtime;
 }
 
 // usage: Coroutine::current().yield()

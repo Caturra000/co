@@ -1,7 +1,7 @@
 .globl contextSwitch
 .type  contextSwitch, @function
 contextSwitch:
-    leaq (%rsp),%rax
+    movq %rsp, %rax
     movq %rax, 104(%rdi)
     movq %rbx, 96(%rdi)
     movq %rcx, 88(%rdi)
@@ -31,7 +31,7 @@ contextSwitch:
     movq 80(%rsi), %rdx
     movq 88(%rsi), %rcx
     movq 96(%rsi), %rbx
-    leaq 8(%rsp), %rsp
+    addq $8, %rsp
     pushq 72(%rsi)
 
     movq 64(%rsi), %rsi

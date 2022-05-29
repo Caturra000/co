@@ -11,9 +11,9 @@ struct State {
     constexpr static Bitmask RUNNING = 1 << 2;
     constexpr static Bitmask EXIT = 1 << 3;
 
-    Bitmask operator&(Bitmask mask) { return flag & mask; }
-    Bitmask operator|(Bitmask mask) { return flag | mask; }
-    Bitmask operator^(Bitmask mask) { return flag ^ mask; }
+    Bitmask operator&(Bitmask mask) const { return flag & mask; }
+    Bitmask operator|(Bitmask mask) const { return flag | mask; }
+    Bitmask operator^(Bitmask mask) const { return flag ^ mask; }
 
     void operator&=(Bitmask mask) { flag &= mask; }
     void operator|=(Bitmask mask) { flag |= mask; }
