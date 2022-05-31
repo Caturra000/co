@@ -17,7 +17,6 @@ contextSwitch:
     movq %r13, 16(%rdi)
     movq %r14, 8(%rdi)
     movq %r15, (%rdi)
-    xorq %rax, %rax
 
     movq 48(%rsi), %rbp
     movq 104(%rsi), %rsp
@@ -31,8 +30,10 @@ contextSwitch:
     movq 80(%rsi), %rdx
     movq 88(%rsi), %rcx
     movq 96(%rsi), %rbx
-    addq $8, %rsp
-    pushq 72(%rsi)
+    movq 72(%rsi), %rax
+    movq %rax, (%rsp)
+
+    xorq %rax, %rax
 
     movq 64(%rsi), %rsi
     ret
