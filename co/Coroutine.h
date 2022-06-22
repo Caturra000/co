@@ -1,4 +1,6 @@
 #pragma once
+#include <cstddef>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include "State.h"
@@ -65,5 +67,112 @@ private:
     std::function<void()> _entry;
     Environment *_master;
 };
+
+class Environment {
+    friend class Coroutine;
+public:
+    static Environment& instance();
+
+    template <typename Entry, typename ...Args>
+    std::shared_ptr<Coroutine> createCoroutine(Entry &&entry, Args &&...arguments);
+
+    Coroutine* current();
+
+    Environment(const Environment&) = delete;
+    Environment& operator=(const Environment&) = delete;
+
+private:
+    void push(std::shared_ptr<Coroutine> coroutine);
+    void pop();
+    Environment();
+
+private:
+    std::array<std::shared_ptr<Coroutine>, 1024> _cStack;
+    size_t _cStackTop;
+    std::shared_ptr<Coroutine> _main;
+};
+
+
+template <typename Entry, typename ...Args>
+inline std::shared_ptr<Coroutine> Environment::createCoroutine(Entry &&entry, Args &&...arguments) {
+    return std::make_shared<Coroutine>(
+        this, std::forward<Entry>(entry), std::forward<Args>(arguments)...);
+}
+
+inline Environment& Environment::instance() {
+    static thread_local Environment env;
+    return env;
+}
+
+inline Coroutine* Environment::current() {
+    return _cStack[_cStackTop - 1].get();
+}
+
+inline void Environment::push(std::shared_ptr<Coroutine> coroutine) {
+    _cStack[_cStackTop++] = std::move(coroutine);
+}
+
+inline void Environment::pop() {
+    _cStackTop--;
+}
+
+inline Environment::Environment(): _cStackTop(0) {
+    _main = std::make_shared<Coroutine>(this, [](){});
+    // TODO set State
+    push(_main);
+}
+
+
+
+inline Coroutine& Coroutine::current() {
+    return *Environment::instance().current();
+}
+
+inline bool Coroutine::test() {
+    return current()._context.test();
+}
+
+inline const State Coroutine::runtime() const {
+    return _runtime;
+}
+
+inline bool Coroutine::exit() const {
+    return _runtime & State::EXIT;
+}
+
+inline bool Coroutine::running() const {
+    return _runtime & State::RUNNING;
+}
+
+inline const State Coroutine::resume() {
+    if(!(_runtime & State::RUNNING)) {
+        _context.prepare(Coroutine::callWhenFinish, this);
+        _runtime |= State::RUNNING;
+        _runtime &= ~State::EXIT;
+    }
+    auto previous = _master->current();
+    _master->push(shared_from_this());
+    _context.switchFrom(&previous->_context);
+    return _runtime;
+}
+
+inline void Coroutine::yield() {
+    auto &coroutine = current();
+    auto &currentContext = coroutine._context;
+
+    coroutine._master->pop();
+
+    auto &previousContext = current()._context;
+    previousContext.switchFrom(&currentContext);
+}
+
+inline void Coroutine::callWhenFinish(Coroutine *coroutine) {
+    auto &routine = coroutine->_entry;
+    auto &runtime = coroutine->_runtime;
+    if(routine) routine();
+    runtime ^= (State::EXIT | State::RUNNING);
+    // coroutine->yield();
+    yield();
+}
 
 } // co
