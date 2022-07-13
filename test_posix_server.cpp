@@ -6,6 +6,7 @@
 
 // 测试posix风格的协程接口
 // 目前已支持：
+// - connect
 // - accept4
 // - read
 // - write

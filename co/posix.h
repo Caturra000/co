@@ -27,7 +27,7 @@ struct Event;
 
 ssize_t read(int fd, void *buf, size_t size);
 ssize_t write(int fd, void *buf, size_t size);
-// int connect(int fd, const sockaddr *addr, socklen_t len);
+int connect(int fd, const sockaddr *addr, socklen_t len);
 int accept4(int fd, sockaddr *addr, socklen_t *len, int flags);
 
 
@@ -175,15 +175,51 @@ inline ssize_t write(int fd, void *buf, size_t size) {
     return ret;
 }
 
-// int connect(int fd, const sockaddr *addr, socklen_t len) {
-//     auto &poll = getPollConfig();
-//     auto iter = addEvent(fd, Event::Type::READ);
-//     if(iter == poll.events.end()) {
-//         errno = EPERM;
-//         return -1;
-//     }
-//     return 0;
-// }
+int connect(int fd, const sockaddr *addr, socklen_t len) {
+    while(1) {
+        int ret;
+
+        ret = ::connect(fd, addr, len);
+
+        auto &poll = getPollConfig();
+        auto iter = addEvent(fd, Event::Type::WRITE);
+        if(iter == poll.events.end()) {
+            errno = EPERM;
+            return -1;
+        }
+
+        this_coroutine::yield();
+
+        int soerr;
+        socklen_t jojo = sizeof(soerr);
+        if(::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &jojo)) {
+            errno = EPERM;
+            return -1;
+        }
+        switch(soerr) {
+            case 0: {
+                sockaddr jojo;
+                socklen_t dio = sizeof jojo;
+                if(::getpeername(fd, &jojo, &dio)) {
+                    // retry
+                    continue;
+                }
+                return 0;
+            }
+            case EINTR:
+            case EINPROGRESS:
+            case EISCONN:
+            case EALREADY:
+            case ECONNREFUSED:
+                // retry
+                continue;
+            default:
+                errno = soerr;
+                return -1;
+        }
+        return 0;
+    }
+}
 
 int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
     int ret = ::accept4(fd, addr, len, flags);
