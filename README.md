@@ -7,6 +7,8 @@
 * 非对称式+有栈协程
 * 适用于`Linux x86_64`环境
 * 提供友好的函数调用方式、闭包和协程检测机制
+* `header-only`支持
+* 协程化的`POSIX`接口适配
 
 ## 接口
 
@@ -97,6 +99,23 @@ int main() {
 // bye
 // running code in a thread
 ```
+
+## 进阶：POSIX接口
+
+`co`支持`POSIX`风格的接口：比如用`co::read`替代系统调用`read`
+
+其目的是以直观、同步的写法来完成异步事件，很轻松地完成高并发的服务器和客户端
+
+目前已支持：
+
+* `co::read`
+* `co::write`
+* `co::accept4`
+* `co::connect`
+
+示例可以看`test_posix`前缀的文件，仅要求`fd`为`NONBLOCK`形式
+
+原理还是控制流的切换，并且搭配`epoll`来作为一个隐藏的调度器
 
 ## 闲聊
 
