@@ -1,7 +1,10 @@
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>
 #include <arpa/inet.h>
 #include <iostream>
+#include <deque>
+#include <vector>
 #include "co.hpp"
 
 // 测试posix风格的协程接口
@@ -11,9 +14,21 @@
 // - read
 // - write
 
+// ready connections
+static std::deque<int> fdPool;
+
+// pending workers
+static std::vector<std::shared_ptr<co::Coroutine>> pendings;
+
+// index: worker index
+void worker(int index);
+
+// server: server fd
+void listener(int server);
+
 int main() {
     auto &env = co::open();
-    constexpr static size_t LIMIT = 1;
+    constexpr static size_t WORKERS = 10;
 
     ::signal(SIGPIPE, SIG_IGN);
 
@@ -37,57 +52,97 @@ int main() {
     if(::bind(server, (const sockaddr*)&addr, sizeof addr)) {
         ::exit(-3);
     }
-    if(::listen(server, LIMIT)) {
+    if(::listen(server, SOMAXCONN)) {
         ::exit(-4);
     }
 
-    // 只处理LIMTI个连接，断连后不恢复
-    for(auto countdown = LIMIT; countdown--;) {
-        auto co = env.createCoroutine([&, countdown] {
-            size_t index = LIMIT - countdown;
-            std::cerr << "co: " << index << std::endl;
-
-            sockaddr addr;
-            socklen_t len;
-
-            // connection
-            int connection = co::accept4(server, &addr, &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
-            if(connection < 0) {
-                std::cerr << "what? " << strerror(errno) << std::endl;
-                std::cerr << "index: " << index << std::endl;
-                return;
-            }
-            std::cout << "connection: " << connection << std::endl;
-
-            // read-write echo
-            while(1) {
-                char buf[0xff];
-                int n = co::read(connection, buf, sizeof buf);
-                if(n < 0) {
-                    std::cerr << "index " << index
-                        << " read failed: " << strerror(errno) << std::endl;
-                } else {
-                    // 可能是0，比如对端已经关闭（已忽略broken pipe）
-                    std::cout << "index " << index
-                        << "read " << n << "bytes" << std::endl;
-
-                    if(n == 0) break;
-                }
-                n = co::write(connection, buf, n);
-                if(n < 0) {
-                    std::cerr << "index " << index
-                        << " write failed: " << strerror(errno) << std::endl;
-                } else {
-                    std::cout << "index " << index
-                        << " write " << n << " bytes" << std::endl;
-
-                    if(n == 0) break;
-                }
-            }
-        });
-
+    for(auto index = 0; index < WORKERS; index++) {
+        auto co = env.createCoroutine(worker, index);
         co->resume();
     }
 
+    auto co = env.createCoroutine(listener, server);
+    co->resume();
+
     co::loop();
+}
+
+
+
+
+auto current() -> std::shared_ptr<co::Coroutine> {
+    return co::Coroutine::current().shared_from_this();
+}
+
+void worker(int index) {
+    std::cerr << "co: " << index << std::endl;
+
+    char roll = 0;
+    // 让每个connection都有机会处理到，即使worker小于client数目
+    auto pick = [&roll] {
+        int fd;
+        if(roll) {
+            fd = fdPool.front();
+            fdPool.pop_front();
+        } else {
+            fd = fdPool.back();
+            fdPool.pop_back();
+        }
+        roll ^= 1;
+        return fd;
+    };
+
+    // read-write echo
+    while(1) {
+        // TODO hook co::usleep
+        if(fdPool.empty()) {
+            pendings.emplace_back(current());
+            co::this_coroutine::yield();
+            continue;
+        }
+        auto connection = pick();
+        char buf[0xff];
+        int n = co::read(connection, buf, sizeof buf);
+        if(n < 0) {
+            std::cerr << "index " << index
+                << " read failed: " << strerror(errno) << std::endl;
+        } else {
+            // 可能是0，比如对端已经关闭（已忽略broken pipe）
+            std::cout << "index " << index
+                << "read " << n << " bytes" << std::endl;
+
+            if(n == 0) break;
+        }
+        n = co::write(connection, buf, n);
+        if(n < 0) {
+            std::cerr << "index " << index
+                << " write failed: " << strerror(errno) << std::endl;
+        } else {
+            std::cout << "index " << index
+                << " write " << n << " bytes" << std::endl;
+
+            if(n == 0) break;
+        }
+
+        fdPool.push_back(connection);
+    }
+}
+
+void listener(int server) {
+    sockaddr addr;
+    socklen_t len;
+    while(1) {
+        int connection = co::accept4(server, &addr, &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+        if(connection < 0) {
+            std::cerr << "what? " << strerror(errno) << std::endl;
+            continue;
+        }
+        std::cout << "connection: " << connection << std::endl;
+        fdPool.push_back(connection);
+        if(!pendings.empty()) {
+            auto wakeup = *--pendings.end();
+            pendings.pop_back();
+            wakeup->resume();
+        }
+    }
 }
