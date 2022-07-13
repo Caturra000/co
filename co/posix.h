@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/timerfd.h>
 #include <array>
 #include <chrono>
 #include <unordered_map>
@@ -30,6 +31,7 @@ ssize_t write(int fd, void *buf, size_t size);
 int connect(int fd, const sockaddr *addr, socklen_t len);
 int accept4(int fd, sockaddr *addr, socklen_t *len, int flags);
 
+int usleep(useconds_t usec);
 
 PollConfig& getPollConfig();
 void loop();
@@ -231,6 +233,47 @@ inline int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
     if(iter == poll.events.end()) return 0;
     this_coroutine::yield();
     ret = ::accept4(fd, addr, len, flags);
+    return ret;
+}
+
+
+inline int usleep(useconds_t usec) {
+    // usec is greater than or equal to 1000000.
+    // (On systems where that is considered an error.)
+    if(usec >= 1000000) {
+        errno = EINVAL;
+        return -1;
+    }
+    int timerfd = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if(timerfd < 0) {
+        // usleep允许的errno太少了
+        errno = EINTR;
+        return -1;
+    }
+
+    auto defer = [=](void*) { ::close(timerfd); };
+    std::shared_ptr<void> guard {nullptr, defer};
+
+    itimerspec newValue {};
+    itimerspec oldValue {};
+    newValue.it_value.tv_sec = usec / 1000;
+    newValue.it_value.tv_nsec = usec % 1000 * 1000000;
+    if(::timerfd_settime(timerfd, 0, &newValue, &oldValue)) {
+        errno = EINTR;
+        return -1;
+    }
+
+    auto iter = addEvent(timerfd, Event::Type::READ);
+
+    co::this_coroutine::yield();
+
+    itimerspec retValue {};
+    if(::timerfd_gettime(timerfd, &retValue)) {
+        errno = EINTR;
+        return -1;
+    }
+    int ret = retValue.it_value.tv_sec * 1000
+            + retValue.it_value.tv_nsec / 1000000;
     return ret;
 }
 

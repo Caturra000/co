@@ -13,12 +13,16 @@
 // - accept4
 // - read
 // - write
+// - usleep
 
 // ready connections
 static std::deque<int> fdPool;
 
 // pending workers
+// and simple global notification
 static std::vector<std::shared_ptr<co::Coroutine>> pendings;
+void wait();
+void notify();
 
 // index: worker index
 void worker(int index);
@@ -67,11 +71,21 @@ int main() {
     co::loop();
 }
 
-
-
-
 auto current() -> std::shared_ptr<co::Coroutine> {
     return co::Coroutine::current().shared_from_this();
+}
+
+void wait() {
+    pendings.emplace_back(current());
+    co::this_coroutine::yield();
+}
+
+void notify() {
+    if(!pendings.empty()) {
+        auto wakeup = *--pendings.end();
+        pendings.pop_back();
+        wakeup->resume();
+    }
 }
 
 void worker(int index) {
@@ -94,10 +108,16 @@ void worker(int index) {
 
     // read-write echo
     while(1) {
-        // TODO hook co::usleep
+        // 此时无法消费
         if(fdPool.empty()) {
-            pendings.emplace_back(current());
-            co::this_coroutine::yield();
+            // 可以使用简单的wait-notify封装
+            // 消费者wait，需要生产者配合notify
+            wait();
+
+            // 或者使用usleep协程定时机制
+            // 不需要生产者主动通知
+            // co::usleep(1000);
+
             continue;
         }
         auto connection = pick();
@@ -130,7 +150,7 @@ void worker(int index) {
 
 void listener(int server) {
     sockaddr addr;
-    socklen_t len;
+    socklen_t len = sizeof addr;
     while(1) {
         int connection = co::accept4(server, &addr, &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
         if(connection < 0) {
@@ -139,10 +159,6 @@ void listener(int server) {
         }
         std::cout << "connection: " << connection << std::endl;
         fdPool.push_back(connection);
-        if(!pendings.empty()) {
-            auto wakeup = *--pendings.end();
-            pendings.pop_back();
-            wakeup->resume();
-        }
+        notify();
     }
 }
