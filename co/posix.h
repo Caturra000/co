@@ -161,6 +161,7 @@ inline ssize_t read(int fd, void *buf, size_t size) {
     ret = ::read(fd, buf, size);
     return ret;
 }
+
 inline ssize_t write(int fd, void *buf, size_t size) {
     ssize_t ret;
     ret = ::write(fd, buf, size);
@@ -175,7 +176,7 @@ inline ssize_t write(int fd, void *buf, size_t size) {
     return ret;
 }
 
-int connect(int fd, const sockaddr *addr, socklen_t len) {
+inline int connect(int fd, const sockaddr *addr, socklen_t len) {
     while(1) {
         int ret;
 
@@ -221,7 +222,7 @@ int connect(int fd, const sockaddr *addr, socklen_t len) {
     }
 }
 
-int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
+inline int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
     int ret = ::accept4(fd, addr, len, flags);
     if(ret >= 0) return ret;
     auto &poll = getPollConfig();
