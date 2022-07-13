@@ -114,7 +114,7 @@ int main() {
 * `co::connect`
 * `co::usleep`
 
-示例可以看`test_posix`前缀的文件，仅要求`fd`为`NONBLOCK`形式
+示例可以看`test_posix`前缀的文件（[服务端](test_posix_server.cpp)和[客户端](test_posix_client.cpp)），仅要求`fd`为`NONBLOCK`形式
 
 原理还是控制流的切换，并且搭配`epoll`来作为一个隐藏的调度器
 
@@ -126,7 +126,7 @@ int main() {
 
 如果是一对多或者多对多，可以自己写一个简单的`wait / notify`（见示例）
 
-或者干脆用`co::usleep`等接口，生产者定时轮询，不需要生产者做任何事情
+或者干脆用`co::usleep`等接口，消费者定时轮询，不需要生产者做任何事情
 
 ## 闲聊
 
