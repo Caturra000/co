@@ -69,10 +69,12 @@ struct PollConfig {
     using Milliseconds = std::chrono::milliseconds;
 
     constexpr static auto DEFAULT_TIMEOUT = std::chrono::milliseconds(1000);
+    constexpr static auto DEFAULT_CONNECT_RETRIES = size_t(9);
 
     int          epfd;
     Milliseconds timeout {DEFAULT_TIMEOUT};
     EventList    events;
+    size_t       connectRetries {DEFAULT_CONNECT_RETRIES};
 
     explicit PollConfig(int fd = -1): epfd(fd) {
         if(epfd < 0) {
@@ -179,7 +181,18 @@ inline ssize_t write(int fd, void *buf, size_t size) {
 }
 
 inline int connect(int fd, const sockaddr *addr, socklen_t len) {
-    while(1) {
+    const size_t maxRetries = getPollConfig().connectRetries;
+    size_t retries = 0;
+
+    while(retries < maxRetries) {
+
+        // back-off
+        // 0 - 0 - 0 - 1s - 2s - 4s - 8s - 16s - 32s - ...
+        // or custom retries
+        if(retries++ > 2) {
+            co::usleep(64 << retries);
+        }
+
         int ret;
 
         ret = ::connect(fd, addr, len);
@@ -200,7 +213,12 @@ inline int connect(int fd, const sockaddr *addr, socklen_t len) {
             return -1;
         }
         switch(soerr) {
-            case 0: {
+            case 0:
+            case EINTR:
+            case EINPROGRESS:
+            case EALREADY:
+            case EISCONN:
+            {
                 sockaddr jojo;
                 socklen_t dio = sizeof jojo;
                 if(::getpeername(fd, &jojo, &dio)) {
@@ -209,10 +227,10 @@ inline int connect(int fd, const sockaddr *addr, socklen_t len) {
                 }
                 return 0;
             }
-            case EINTR:
-            case EINPROGRESS:
-            case EISCONN:
-            case EALREADY:
+            case EAGAIN:
+            case EADDRINUSE:
+            case EADDRNOTAVAIL:
+            case ENETUNREACH:
             case ECONNREFUSED:
                 // retry
                 continue;
@@ -222,6 +240,8 @@ inline int connect(int fd, const sockaddr *addr, socklen_t len) {
         }
         return 0;
     }
+    errno = ETIMEDOUT;
+    return -1;
 }
 
 inline int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
