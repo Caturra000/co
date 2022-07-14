@@ -14,6 +14,7 @@
 // - read
 // - write
 // - usleep
+// - poll
 
 // ready connections
 static std::deque<int> fdPool;

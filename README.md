@@ -113,10 +113,19 @@ int main() {
 * `co::accept4`
 * `co::connect`
 * `co::usleep`
+* `co::poll`
 
 示例可以看`test_posix`前缀的文件（[服务端](test_posix_server.cpp)和[客户端](test_posix_client.cpp)），仅要求`fd`为`NONBLOCK`形式
 
 原理还是控制流的切换，并且搭配`epoll`来作为一个隐藏的调度器
+
+### 超时处理
+
+使用`co::poll`可以定制每一个读写操作的超时时间，方便进行异常处理
+
+并且允许`co::poll(nullptr, 0, timeout)`直接作为定时器使用
+
+但是对于简单的定时任务更加建议用`co::usleep()`
 
 ### TODO 事件机制
 

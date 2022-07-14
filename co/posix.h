@@ -1,11 +1,13 @@
 #pragma once
 #include <unistd.h>
+#include <poll.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <array>
 #include <chrono>
 #include <unordered_map>
+#include <map>
 #include <memory>
 #include <iostream>
 #include "Coroutine.h"
@@ -32,6 +34,8 @@ int connect(int fd, const sockaddr *addr, socklen_t len);
 int accept4(int fd, sockaddr *addr, socklen_t *len, int flags);
 
 int usleep(useconds_t usec);
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 
 PollConfig& getPollConfig();
 void loop();
@@ -276,8 +280,8 @@ inline int usleep(useconds_t usec) {
 
     itimerspec newValue {};
     itimerspec oldValue {};
-    newValue.it_value.tv_sec = usec / 1000;
-    newValue.it_value.tv_nsec = usec % 1000 * 1000000;
+    // newValue.it_value.tv_sec = 0;
+    newValue.it_value.tv_nsec = usec * 1000;
     if(::timerfd_settime(timerfd, 0, &newValue, &oldValue)) {
         errno = EINTR;
         return -1;
@@ -292,8 +296,110 @@ inline int usleep(useconds_t usec) {
         errno = EINTR;
         return -1;
     }
-    int ret = retValue.it_value.tv_sec * 1000
-            + retValue.it_value.tv_nsec / 1000000;
+    int ret = retValue.it_value.tv_nsec / 1000;
+    return ret;
+}
+
+inline int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
+
+    // TODO 如果有同一fd关注到不同的fds下标，需要poll merge
+
+    int ret;
+
+    // try
+    ret = ::poll(fds, nfds, 0);
+    if(ret != 0 || timeout == 0) return ret;
+
+    // epoll can wait for epoll itself
+
+    int epfd = ::epoll_create1(EPOLL_CLOEXEC);
+    if(epfd < 0) return -1;
+
+    // real timer
+
+    int timerfd = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if(timerfd < 0) return -1;
+
+    itimerspec newValue {};
+    itimerspec oldValue {};
+    // ms -> s
+    newValue.it_value.tv_sec = timeout / 1000;
+    // ms -> us(1000) -> ns(1000)
+    newValue.it_value.tv_nsec = timeout % 1000 * 1000000;
+    if(::timerfd_settime(timerfd, 0, &newValue, &oldValue)) {
+        errno = EINTR;
+        return -1;
+    }
+
+    nfds_t realNfds = nfds + 1;
+
+    // dtor
+
+    auto defer = [=](void*) {
+        ::close(epfd);
+        ::close(timerfd);
+    };
+    std::shared_ptr<void> guard {nullptr, defer};
+
+    // add events
+
+    // 在 < 1000 的量级下，map实际表现优于unordered_map
+    std::map<nfds_t, int> indices2fd;
+    size_t indicesCounter = 0;
+
+    for(nfds_t i = 0; i < nfds; ++i) {
+        epoll_event e {};
+
+        size_t id = indicesCounter++;
+        indices2fd[id] = fds[i].fd;
+        e.data.u64 = id;
+
+        e.events = fds[i].events;
+        ::epoll_ctl(epfd, EPOLL_CTL_ADD, fds[i].fd, &e);
+    }
+
+    epoll_event timedEvent {};
+    size_t timerId = indicesCounter++;
+    indices2fd[timerId] = timerfd;
+    timedEvent.data.u64 = timerId;
+    timedEvent.events = EPOLLIN;
+    if(::epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &timedEvent)) {
+        return -1;
+    }
+
+    addEvent(epfd, Event::Type::READ);
+    co::this_coroutine::yield();
+
+    // collect
+
+    epoll_event *revents;
+
+    constexpr static size_t EVENTS_USE_STACK = 1024;
+    std::vector<epoll_event> eventsLarge;
+    epoll_event eventsSmall[EVENTS_USE_STACK];
+    if(realNfds < EVENTS_USE_STACK) {
+        ::memset(eventsSmall, 0, sizeof eventsSmall);
+        revents = eventsSmall;
+    } else {
+        eventsLarge.reserve(realNfds);
+        revents = eventsLarge.data();
+    }
+
+    int realRet = ::epoll_wait(epfd, revents, realNfds, 0);
+    if(realRet < 0) return -1;
+
+    ret = realRet;
+
+    for(nfds_t i = 0; i < realRet; ++i) {
+        auto &e = revents[i];
+        auto index = e.data.u64;
+        int fd = indices2fd[index];
+        if(fd == timerfd) {
+            ret--;
+            continue;
+        }
+        fds[index].revents = e.events;
+    }
     return ret;
 }
 
