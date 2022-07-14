@@ -4,6 +4,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <unordered_map>
@@ -33,6 +34,7 @@ ssize_t write(int fd, void *buf, size_t size);
 int connect(int fd, const sockaddr *addr, socklen_t len);
 int accept4(int fd, sockaddr *addr, socklen_t *len, int flags);
 
+unsigned int sleep(unsigned int seconds);
 int usleep(useconds_t usec);
 
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
@@ -260,6 +262,39 @@ inline int accept4(int fd, sockaddr *addr, socklen_t *len, int flags) {
     return ret;
 }
 
+inline unsigned int sleep(unsigned int seconds) {
+    using namespace std::chrono;
+    auto now = [] { return steady_clock::now(); };
+    auto delta = [&, start = now()] {
+        auto d = duration_cast<std::chrono::seconds>(now() - start);
+        return std::max<int64_t>(0, seconds - d.count());
+    };
+
+    int timerfd = ::timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if(timerfd < 0) {
+        return delta();
+    }
+
+    auto defer = [=](auto) { ::close(timerfd);  };
+    std::shared_ptr<void> guard {nullptr, defer};
+
+    itimerspec newValue {};
+    itimerspec oldValue {};
+    newValue.it_value.tv_sec = seconds;
+    if(::timerfd_settime(timerfd, 0, &newValue, &oldValue)) {
+        return delta();
+    }
+
+    auto iter = addEvent(timerfd, Event::Type::READ);
+
+    co::this_coroutine::yield();
+
+    itimerspec retValue {};
+    if(::timerfd_gettime(timerfd, &retValue)) {
+        return delta();
+    }
+    return retValue.it_value.tv_sec;
+}
 
 inline int usleep(useconds_t usec) {
     // usec is greater than or equal to 1000000.

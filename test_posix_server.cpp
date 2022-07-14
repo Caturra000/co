@@ -13,6 +13,7 @@
 // - accept4
 // - read
 // - write
+// - sleep
 // - usleep
 // - poll
 

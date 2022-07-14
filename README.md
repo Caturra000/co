@@ -112,6 +112,7 @@ int main() {
 * `co::write`
 * `co::accept4`
 * `co::connect`
+* `co::sleep`
 * `co::usleep`
 * `co::poll`
 
@@ -125,7 +126,7 @@ int main() {
 
 并且允许`co::poll(nullptr, 0, timeout)`直接作为定时器使用
 
-但是对于简单的定时任务更加建议用`co::usleep()`
+但是对于简单的定时任务更加建议用`co::usleep()`或`co::sleep()`
 
 ### TODO 事件机制
 
