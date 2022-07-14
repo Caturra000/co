@@ -73,7 +73,7 @@ struct PollConfig {
     using Milliseconds = std::chrono::milliseconds;
 
     constexpr static auto DEFAULT_TIMEOUT = std::chrono::milliseconds(1000);
-    constexpr static auto DEFAULT_CONNECT_RETRIES = size_t(9);
+    constexpr static auto DEFAULT_CONNECT_RETRIES = size_t(8);
 
     int          epfd;
     Milliseconds timeout {DEFAULT_TIMEOUT};
@@ -194,7 +194,7 @@ inline int connect(int fd, const sockaddr *addr, socklen_t len) {
         // 0 - 0 - 0 - 1s - 2s - 4s - 8s - 16s - 32s - ...
         // or custom retries
         if(retries++ > 2) {
-            co::usleep(64 << retries);
+            co::poll(nullptr, 0, 1024 << (retries - 3));
         }
 
         int ret;
@@ -303,6 +303,7 @@ inline int usleep(useconds_t usec) {
 inline int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 
     // TODO 如果有同一fd关注到不同的fds下标，需要poll merge
+    // TODO 针对空fds、单个fds的场合其实仍有优化空间，有空再写吧
 
     int ret;
 
