@@ -12,7 +12,7 @@ class Context;
 // 2. weak保证C++ inline作用，既weak符号，用于header-only库
 // 3. optimize("O3")相当于即使你用O0编译整个程序，这一段代码也会用O3去编，
 //    因为O0会生成多余的push/pop指令导致crash
-extern "C" __attribute__((__noinline__, weak, optimize("O3")))
+extern "C" __attribute__((noinline, weak, optimize("O3")))
 void contextSwitch(Context* prev /*%rdi*/, Context *next /*%rsi*/) {
     asm volatile(R"(
         movq %rsp, %rax
@@ -52,6 +52,30 @@ void contextSwitch(Context* prev /*%rdi*/, Context *next /*%rsi*/) {
         xorq %rax, %rax
     )");
     // 这里由gcc直接生成ret指令
+}
+
+extern "C" __attribute__((noinline, weak, optimize("O3")))
+void contextSwitchOnly(Context *next/*%rdi*/) {
+    asm volatile(R"(
+        movq 48(%rdi), %rbp
+        movq 104(%rdi), %rsp
+        movq (%rdi), %r15
+        movq 8(%rdi), %r14
+        movq 16(%rdi), %r13
+        movq 24(%rdi), %r12
+        movq 32(%rdi), %r9
+        movq 40(%rdi), %r8
+        movq 64(%rdi), %rsi
+        movq 72(%rdi), %rax
+        movq 80(%rdi), %rdx
+        movq 88(%rdi), %rcx
+        movq 96(%rdi), %rbx
+
+        movq 56(%rdi), %rdi
+
+        movq %rax, (%rsp)
+        xorq %rax, %rax
+    )");
 }
 
 } // co

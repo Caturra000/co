@@ -3,6 +3,8 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <vector>
+#include <array>
 #include "State.h"
 #include "Context.h"
 
@@ -52,18 +54,19 @@ public:
 public:
 
     // 构造Coroutine执行函数，entry为函数入口，对应传参为arguments...
-    // Note: 出于可重入的考虑，entry强制为值语义
+    // Note: 不可重入
     template <typename Entry, typename ...Args>
-    Coroutine(Environment *master, Entry entry, Args ...arguments)
-        : _entry([=] { entry(/*std::move*/(arguments)...); }),
+    Coroutine(Environment *master, Entry &&entry, Args &&...arguments)
+        : _entry([=] { entry(std::move(arguments)...); }),
+          _context(nullptr),
           _master(master) {}
 
 private:
-    static void callWhenFinish(Coroutine *coroutine);
+    static void routineWrapper(Coroutine *coroutine);
 
 private:
     State _runtime {};
-    Context _context;
+    std::unique_ptr<Context> _context;
     std::function<void()> _entry;
     Environment *_master;
 };
@@ -87,9 +90,21 @@ private:
     Environment();
 
 private:
-    std::array<std::shared_ptr<Coroutine>, 1024> _cStack;
-    size_t _cStackTop;
+    std::vector<std::shared_ptr<Coroutine>> _cStack;
     std::shared_ptr<Coroutine> _main;
+
+/// Context 延迟分配和快速复用
+private:
+    std::unique_ptr<Context> reuse();
+    bool reusable() { return _recycleTop > 0; }
+
+    void recycle(std::unique_ptr<Context> trash);
+    bool recyclable() { return _recycleTop != _recycleStack.size(); }
+
+
+private:
+    std::array<std::unique_ptr<Context>, 0xff> _recycleStack;
+    size_t _recycleTop {};
 };
 
 
@@ -105,31 +120,39 @@ inline Environment& Environment::instance() {
 }
 
 inline Coroutine* Environment::current() {
-    return _cStack[_cStackTop - 1].get();
+    return _cStack.back().get();
 }
 
 inline void Environment::push(std::shared_ptr<Coroutine> coroutine) {
-    _cStack[_cStackTop++] = std::move(coroutine);
+    _cStack.emplace_back(std::move(coroutine));
 }
 
 inline void Environment::pop() {
-    _cStackTop--;
+    _cStack.pop_back();
 }
 
-inline Environment::Environment(): _cStackTop(0) {
+inline Environment::Environment() {
     _main = std::make_shared<Coroutine>(this, [](){});
+    _main->_context = std::make_unique<Context>();
     // TODO set State
     push(_main);
 }
 
+inline std::unique_ptr<Context> Environment::reuse() {
+    auto up = std::move(_recycleStack[--_recycleTop]);
+    return up;
+}
 
+inline void Environment::recycle(std::unique_ptr<Context> trash) {
+    _recycleStack[_recycleTop++] = std::move(trash);
+}
 
 inline Coroutine& Coroutine::current() {
     return *Environment::instance().current();
 }
 
 inline bool Coroutine::test() {
-    return current()._context.test();
+    return current()._context && current()._context->test();
 }
 
 inline const State Coroutine::runtime() const {
@@ -145,14 +168,18 @@ inline bool Coroutine::running() const {
 }
 
 inline const State Coroutine::resume() {
+    if(_runtime & State::EXIT) {
+        return _runtime;
+    }
     if(!(_runtime & State::RUNNING)) {
-        _context.prepare(Coroutine::callWhenFinish, this);
+        _context = _master->reusable() ?
+            _master->reuse() : std::make_unique<Context>();
+        _context->prepare(Coroutine::routineWrapper, this);
         _runtime |= State::RUNNING;
-        _runtime &= ~State::EXIT;
     }
     auto previous = _master->current();
     _master->push(shared_from_this());
-    _context.switchFrom(&previous->_context);
+    _context->switchFrom(previous->_context.get());
     return _runtime;
 }
 
@@ -163,15 +190,26 @@ inline void Coroutine::yield() {
     coroutine._master->pop();
 
     auto &previousContext = current()._context;
-    previousContext.switchFrom(&currentContext);
+    if(currentContext) {
+        previousContext->switchFrom(currentContext.get());
+    } else {
+        // switch without backup
+        previousContext->switchOnly();
+    }
 }
 
-inline void Coroutine::callWhenFinish(Coroutine *coroutine) {
+inline void Coroutine::routineWrapper(Coroutine *coroutine) {
     auto &routine = coroutine->_entry;
     auto &runtime = coroutine->_runtime;
+    auto *master = coroutine->_master;
     if(routine) routine();
     runtime ^= (State::EXIT | State::RUNNING);
     // coroutine->yield();
+
+    if(master->recyclable()) {
+        master->recycle(std::move(coroutine->_context));
+    }
+
     yield();
 }
 
