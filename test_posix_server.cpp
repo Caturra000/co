@@ -93,6 +93,17 @@ void notify() {
 void worker(int index) {
     std::cerr << "co: " << index << std::endl;
 
+    auto log = [index](int nbytes, const char *failmsg, const char *succmsg) {
+        if(nbytes < 0) {
+            std::cerr << "index " << index << ' '
+                << failmsg << ": " << strerror(errno) << std::endl;
+        } else {
+            // 可能是0，比如对端已经关闭（已忽略broken pipe）
+            std::cout << "index " << index << ' '
+                << succmsg << ": " <<  nbytes << " bytes" << std::endl;
+        }
+    };
+
     char roll = 0;
     // 让每个connection都有机会处理到，即使worker小于client数目
     auto pick = [&roll] {
@@ -123,30 +134,24 @@ void worker(int index) {
             continue;
         }
         auto connection = pick();
+
         char buf[0xff];
+
+
         int n = co::read(connection, buf, sizeof buf);
-        if(n < 0) {
-            std::cerr << "index " << index
-                << " read failed: " << strerror(errno) << std::endl;
-        } else {
-            // 可能是0，比如对端已经关闭（已忽略broken pipe）
-            std::cout << "index " << index
-                << "read " << n << " bytes" << std::endl;
+        log(n, "read failed", "read");
 
-            if(n == 0) break;
-        }
-        n = co::write(connection, buf, n);
-        if(n < 0) {
-            std::cerr << "index " << index
-                << " write failed: " << strerror(errno) << std::endl;
-        } else {
-            std::cout << "index " << index
-                << " write " << n << " bytes" << std::endl;
+        // 可能是FIN，移除连接
+        // 简单的test就不处理socket泄露了
+        if(n == 0) continue;
 
-            if(n == 0) break;
+        if(n > 0) {
+            n = co::write(connection, buf, n);
+            log(n, "write failed", "write");
         }
 
         fdPool.push_back(connection);
+
     }
 }
 
